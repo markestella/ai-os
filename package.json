@@ -1,5 +1,5 @@
 {
-  "name": "ai-os",
+  "name": "@macky_aletse/ai-os",
   "version": "1.0.0",
   "description": "Token-optimized AI orchestration CLI for coding agents",
   "module": "index.ts",
@@ -15,6 +15,7 @@
   },
   "scripts": {
     "dev": "bun run bin/ai.ts",
+    "build": "bun build bin/ai.ts --outdir dist --target node",
     "link": "bun link"
   }
 }
