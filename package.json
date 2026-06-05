@@ -1,0 +1,20 @@
+{
+  "name": "ai-os",
+  "version": "1.0.0",
+  "description": "Token-optimized AI orchestration CLI for coding agents",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "bin": {
+    "ai": "./bin/ai.ts"
+  },
+  "scripts": {
+    "dev": "bun run bin/ai.ts",
+    "link": "bun link"
+  }
+}

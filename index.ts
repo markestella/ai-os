@@ -1,0 +1,12 @@
+export { init } from "./src/commands/init";
+export { task } from "./src/commands/task";
+export { scope } from "./src/commands/scope";
+export { plan } from "./src/commands/plan";
+export { run } from "./src/commands/run";
+export { next } from "./src/commands/next";
+export { status } from "./src/commands/status";
+export { reset } from "./src/commands/reset";
+export { setup } from "./src/commands/setup";
+export { sync } from "./src/commands/sync";
+export { paths } from "./src/core/path";
+export type { AIState } from "./src/core/state";
