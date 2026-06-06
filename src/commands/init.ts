@@ -1,9 +1,9 @@
-import { write, exists } from "../core/fs";
+import { write, dirExists } from "../core/fs";
 import { paths } from "../core/path";
 import { resetState } from "../core/state";
 
 export async function init() {
-  if (await exists(paths.root)) {
+  if (dirExists(paths.root)) {
     console.log("⚠️  AI OS already initialized. Use 'ai reset' to start fresh.");
     return;
   }

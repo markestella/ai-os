@@ -1,4 +1,4 @@
-import { write, exists } from "../core/fs";
+import { write, dirExists } from "../core/fs";
 import { paths } from "../core/path";
 
 const VALID_STACKS = [
@@ -11,7 +11,7 @@ const VALID_STACKS = [
 ];
 
 export async function setup(args: string[]) {
-  if (!(await exists(paths.root))) {
+  if (!dirExists(paths.root)) {
     console.log("❌ AI OS not initialized. Run: ai init");
     return;
   }

@@ -21,6 +21,10 @@ export async function exists(path: string): Promise<boolean> {
   return await Bun.file(path).exists();
 }
 
+export function dirExists(path: string): boolean {
+  return existsSync(path);
+}
+
 export async function readJSON<T = unknown>(path: string): Promise<T> {
   const raw = await read(path);
   return JSON.parse(raw) as T;
