@@ -5,13 +5,11 @@ import { startTokenRun, completeTokenRun, formatTokens, formatDuration } from ".
 import { spawn, execSync } from "child_process";
 import * as readline from "readline";
 
-// ── Agent & Model Definitions ──
+// ── Types ──
 
-interface ModelInfo {
+interface DynamicModel {
   id: string;
   name: string;
-  inputCostPer1k: number;   // $ per 1k input tokens
-  outputCostPer1k: number;  // $ per 1k output tokens
 }
 
 interface AgentInfo {
@@ -19,9 +17,126 @@ interface AgentInfo {
   command: string;
   label: string;
   install: string;
-  models: ModelInfo[];
+  fallbackModels: DynamicModel[];
+  fetchModels: () => Promise<DynamicModel[]>;
   buildArgs: (prompt: string, model?: string) => string[];
 }
+
+// ── Known Pricing (per 1k tokens) ──
+
+const KNOWN_PRICING: Record<string, { input: number; output: number }> = {
+  // OpenAI
+  "o4-mini":       { input: 0.0011,  output: 0.0044 },
+  "o3":            { input: 0.01,    output: 0.04 },
+  "o3-mini":       { input: 0.0011,  output: 0.0044 },
+  "gpt-4.1":       { input: 0.002,   output: 0.008 },
+  "gpt-4.1-mini":  { input: 0.0004,  output: 0.0016 },
+  "gpt-4.1-nano":  { input: 0.0001,  output: 0.0004 },
+  "gpt-4o":        { input: 0.0025,  output: 0.01 },
+  "gpt-4o-mini":   { input: 0.00015, output: 0.0006 },
+  // Anthropic
+  "claude-sonnet-4": { input: 0.003,  output: 0.015 },
+  "claude-opus-4":   { input: 0.015,  output: 0.075 },
+  "claude-haiku-3":  { input: 0.0008, output: 0.004 },
+  "sonnet":          { input: 0.003,  output: 0.015 },
+  "opus":            { input: 0.015,  output: 0.075 },
+  "haiku":           { input: 0.0008, output: 0.004 },
+};
+
+function lookupPricing(modelId: string): { input: number; output: number } | null {
+  if (KNOWN_PRICING[modelId]) return KNOWN_PRICING[modelId]!;
+  for (const [key, pricing] of Object.entries(KNOWN_PRICING)) {
+    if (modelId.startsWith(key)) return pricing;
+  }
+  return null;
+}
+
+// ── Dynamic Model Fetching ──
+
+function parseModelCatalog(data: unknown): DynamicModel[] {
+  if (Array.isArray(data)) {
+    return data
+      .filter((m: any) => m && (m.id || m.name || m.model_id))
+      .map((m: any) => ({
+        id: m.id || m.model_id || m.name,
+        name: m.display_name || m.name || m.id || m.model_id,
+      }));
+  }
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj.models)) return parseModelCatalog(obj.models);
+    if (Array.isArray(obj.data)) return parseModelCatalog(obj.data);
+    return Object.entries(obj)
+      .filter(([_, val]) => val && typeof val === "object")
+      .map(([key, val]: [string, any]) => ({
+        id: key,
+        name: val?.display_name || val?.name || key,
+      }));
+  }
+  return [];
+}
+
+async function fetchCodexModels(): Promise<DynamicModel[]> {
+  // 1. Try `codex debug models --bundled` (works without auth)
+  try {
+    const output = execSync("codex debug models --bundled", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10000,
+    });
+    const models = parseModelCatalog(JSON.parse(output.trim()));
+    if (models.length > 0) return models;
+  } catch {}
+
+  // 2. Fall back to OpenAI API
+  const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY;
+  if (!apiKey) return [];
+  try {
+    const res = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { data: Array<{ id: string }> };
+    const relevant = new Set([
+      "o4-mini", "o3", "o3-mini",
+      "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+      "gpt-4o", "gpt-4o-mini",
+    ]);
+    return data.data
+      .filter((m) => relevant.has(m.id))
+      .map((m) => ({ id: m.id, name: m.id }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchClaudeModels(): Promise<DynamicModel[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return [];
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/models?limit=100", {
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { data: Array<{ id: string; display_name?: string }> };
+    return data.data
+      .filter((m) => !m.id.includes("embed"))
+      .map((m) => ({ id: m.id, name: m.display_name || m.id }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchCopilotModels(): Promise<DynamicModel[]> {
+  // Copilot uses subscription-based auto model selection
+  // No public API to list available models
+  return [];
+}
+
+// ── Agent Definitions ──
 
 const AGENTS: AgentInfo[] = [
   {
@@ -29,16 +144,18 @@ const AGENTS: AgentInfo[] = [
     command: "codex",
     label: "OpenAI Codex CLI",
     install: "npm i -g @openai/codex",
-    models: [
-      { id: "o4-mini", name: "o4-mini (Default)", inputCostPer1k: 0.00110, outputCostPer1k: 0.00440 },
-      { id: "o3", name: "o3", inputCostPer1k: 0.01000, outputCostPer1k: 0.04000 },
-      { id: "gpt-4.1", name: "GPT-4.1", inputCostPer1k: 0.00200, outputCostPer1k: 0.00800 },
-      { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", inputCostPer1k: 0.00040, outputCostPer1k: 0.00160 },
-      { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", inputCostPer1k: 0.00010, outputCostPer1k: 0.00040 },
+    fallbackModels: [
+      { id: "o4-mini", name: "o4-mini" },
+      { id: "o3", name: "o3" },
+      { id: "gpt-4.1", name: "gpt-4.1" },
+      { id: "gpt-4.1-mini", name: "gpt-4.1-mini" },
+      { id: "gpt-4.1-nano", name: "gpt-4.1-nano" },
     ],
+    fetchModels: fetchCodexModels,
     buildArgs: (prompt, model) => {
-      const args = ["--prompt", prompt];
+      const args = ["exec", "--sandbox", "workspace-write"];
       if (model) args.push("--model", model);
+      args.push(prompt);
       return args;
     },
   },
@@ -47,14 +164,16 @@ const AGENTS: AgentInfo[] = [
     command: "claude",
     label: "Claude Code CLI",
     install: "npm i -g @anthropic-ai/claude-code",
-    models: [
-      { id: "sonnet", name: "Claude Sonnet 4 (Default)", inputCostPer1k: 0.00300, outputCostPer1k: 0.01500 },
-      { id: "opus", name: "Claude Opus 4", inputCostPer1k: 0.01500, outputCostPer1k: 0.07500 },
-      { id: "haiku", name: "Claude Haiku 3.5", inputCostPer1k: 0.00080, outputCostPer1k: 0.00400 },
+    fallbackModels: [
+      { id: "sonnet", name: "Claude Sonnet 4" },
+      { id: "opus", name: "Claude Opus 4" },
+      { id: "haiku", name: "Claude Haiku 3.5" },
     ],
+    fetchModels: fetchClaudeModels,
     buildArgs: (prompt, model) => {
-      const args = ["--print", prompt];
-      if (model) args.push("--model", `claude-${model}`);
+      const args = ["-p"];
+      if (model) args.push("--model", model);
+      args.push(prompt);
       return args;
     },
   },
@@ -63,11 +182,14 @@ const AGENTS: AgentInfo[] = [
     command: "gh",
     label: "GitHub Copilot CLI",
     install: "gh extension install github/gh-copilot",
-    models: [
-      { id: "default", name: "Copilot (Subscription)", inputCostPer1k: 0, outputCostPer1k: 0 },
+    fallbackModels: [
+      { id: "auto", name: "Auto (default)" },
     ],
-    buildArgs: (prompt) => {
-      return ["copilot", "suggest", prompt];
+    fetchModels: fetchCopilotModels,
+    buildArgs: (prompt, model) => {
+      const args = ["copilot", "-p", prompt, "--allow-all-tools"];
+      if (model && model !== "auto") args.push("--model", model);
+      return args;
     },
   },
 ];
@@ -93,13 +215,12 @@ function askQuestion(question: string): Promise<string> {
   });
 }
 
-function estimateCost(model: ModelInfo, inputTokens: number, outputTokens: number): string {
-  if (model.inputCostPer1k === 0 && model.outputCostPer1k === 0) {
-    return "Included in subscription";
+function estimateCostStr(modelId: string, agentName: string, inputTokens: number, outputTokens: number): string {
+  const pricing = lookupPricing(modelId);
+  if (!pricing) {
+    return agentName === "copilot" ? "Included in subscription" : "N/A";
   }
-  const inputCost = (inputTokens / 1000) * model.inputCostPer1k;
-  const outputCost = (outputTokens / 1000) * model.outputCostPer1k;
-  const total = inputCost + outputCost;
+  const total = (inputTokens / 1000) * pricing.input + (outputTokens / 1000) * pricing.output;
   if (total < 0.01) return `~$${total.toFixed(4)}`;
   return `~$${total.toFixed(3)}`;
 }
@@ -154,41 +275,50 @@ async function selectAgent(): Promise<AgentInfo | null> {
   return available[choice - 1] ?? null;
 }
 
-async function selectModel(agent: AgentInfo, estimatedInputTokens: number): Promise<ModelInfo | null> {
-  if (agent.models.length === 1) {
-    const model = agent.models[0]!;
+async function selectModel(agent: AgentInfo, estimatedInputTokens: number): Promise<DynamicModel | null> {
+  console.log("\n   Fetching available models...");
+
+  let models = await agent.fetchModels();
+  let source = "fetched";
+
+  if (models.length === 0) {
+    models = agent.fallbackModels;
+    source = "default";
+  }
+
+  if (models.length === 1) {
+    const model = models[0]!;
     const estimatedOutputTokens = Math.ceil(estimatedInputTokens * 0.5);
-    console.log(`\n   Model: ${model.name}`);
-    console.log(`   Est. cost: ${estimateCost(model, estimatedInputTokens, estimatedOutputTokens)}`);
+    console.log(`   Model: ${model.name}`);
+    console.log(`   Est. cost: ${estimateCostStr(model.id, agent.name, estimatedInputTokens, estimatedOutputTokens)}`);
     return model;
   }
 
-  console.log(`\n   Select Model for ${agent.label}:\n`);
+  console.log(`   Found ${models.length} models (${source})\n`);
+  console.log(`   Select Model for ${agent.label}:\n`);
 
   const estimatedOutputTokens = Math.ceil(estimatedInputTokens * 0.5);
 
-  for (let i = 0; i < agent.models.length; i++) {
-    const model = agent.models[i]!;
-    const cost = estimateCost(model, estimatedInputTokens, estimatedOutputTokens);
-
-    let pricing = "";
-    if (model.inputCostPer1k > 0) {
-      pricing = ` │ $${model.inputCostPer1k.toFixed(4)}/1k in, $${model.outputCostPer1k.toFixed(4)}/1k out`;
-    }
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i]!;
+    const pricing = lookupPricing(model.id);
 
     console.log(`   [${i + 1}] ${model.name}`);
-    console.log(`       Est. cost: ${cost}${pricing}`);
+    if (pricing) {
+      const cost = estimateCostStr(model.id, agent.name, estimatedInputTokens, estimatedOutputTokens);
+      console.log(`       Est. cost: ${cost} │ $${pricing.input.toFixed(4)}/1k in, $${pricing.output.toFixed(4)}/1k out`);
+    }
   }
 
-  const answer = await askQuestion(`\n   Choice [1-${agent.models.length}]: `);
+  const answer = await askQuestion(`\n   Choice [1-${models.length}]: `);
   const choice = parseInt(answer);
 
-  if (isNaN(choice) || choice < 1 || choice > agent.models.length) {
+  if (isNaN(choice) || choice < 1 || choice > models.length) {
     console.log("   ❌ Invalid selection.");
     return null;
   }
 
-  return agent.models[choice - 1] ?? null;
+  return models[choice - 1] ?? null;
 }
 
 // ── Prompt Builder ──
@@ -209,12 +339,12 @@ ${context}`;
 
 async function executeAgent(
   agent: AgentInfo,
-  model: ModelInfo,
+  model: DynamicModel,
   promptText: string,
   taskSummary: string,
   scopeCount: number,
 ) {
-  const args = agent.buildArgs(promptText, model.id === "default" ? undefined : model.id);
+  const args = agent.buildArgs(promptText, model.id === "auto" ? undefined : model.id);
 
   await startTokenRun(agent.name, taskSummary, promptText, scopeCount);
 
@@ -248,7 +378,7 @@ async function executeAgent(
     const tokenRun = await completeTokenRun(capturedOutput);
 
     if (code === 0 && tokenRun) {
-      const cost = estimateCost(model, tokenRun.inputTokens, tokenRun.outputTokens);
+      const cost = estimateCostStr(model.id, agent.name, tokenRun.inputTokens, tokenRun.outputTokens);
 
       console.log(`\n${"─".repeat(50)}`);
       console.log(`✅ ${agent.name} (${model.name}) finished\n`);
@@ -385,7 +515,7 @@ ${plan}
   // ── Confirm ──
 
   const estimatedOutputTokens = Math.ceil(estimatedInputTokens * 0.5);
-  const cost = estimateCost(selectedModel, estimatedInputTokens, estimatedOutputTokens);
+  const cost = estimateCostStr(selectedModel.id, selectedAgent.name, estimatedInputTokens, estimatedOutputTokens);
 
   console.log(`\n   ${"─".repeat(40)}`);
   console.log(`   Agent:      ${selectedAgent.label}`);
