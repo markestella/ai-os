@@ -1,6 +1,6 @@
 {
   "name": "@macky_aletse/ai-os",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Token-optimized AI orchestration CLI for coding agents",
   "module": "index.ts",
   "type": "module",
