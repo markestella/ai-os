@@ -67,7 +67,7 @@ const AGENTS: AgentInfo[] = [
       { id: "default", name: "Copilot (Subscription)", inputCostPer1k: 0, outputCostPer1k: 0 },
     ],
     buildArgs: (prompt) => {
-      return ["copilot", "suggest", "-t", "shell", prompt];
+      return ["copilot", "suggest", prompt];
     },
   },
 ];
@@ -224,7 +224,6 @@ async function executeAgent(
 
   const child = spawn(agent.command, args, {
     stdio: ["inherit", "pipe", "pipe"],
-    shell: true,
   });
 
   child.stdout?.on("data", (data: Buffer) => {
