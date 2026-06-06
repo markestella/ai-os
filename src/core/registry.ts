@@ -1,4 +1,4 @@
-const DEFAULT_REGISTRY_URL = "https://ai-cli-registry.mckbyte.com";
+const DEFAULT_REGISTRY_URL = "http://ai-cli-registry.mckbyte.com";
 
 interface VersionEntry {
   path: string;
