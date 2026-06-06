@@ -1,4 +1,5 @@
 import { getState, setState, resolvePhase } from "../core/state";
+import { getTokenHistory, formatTokens, formatDuration } from "../core/tokens";
 
 export async function next() {
   const state = await getState();
@@ -26,4 +27,25 @@ export async function next() {
 
   console.log(`Step ${nextState.step}: ${currentPhase} → ${transition.next}`);
   console.log(`   ${transition.message}`);
+
+  // Show token summary when completing a run
+  if (currentPhase === "running") {
+    const history = await getTokenHistory();
+    const lastRun = history.runs.at(-1);
+    if (lastRun) {
+      console.log(`\n   ── Last Run ──`);
+      console.log(`   Agent:    ${lastRun.agent}`);
+      console.log(`   Input:    ${formatTokens(lastRun.inputTokens)} tokens`);
+      console.log(`   Output:   ${formatTokens(lastRun.outputTokens)} tokens`);
+      console.log(`   Total:    ${formatTokens(lastRun.totalTokens)} tokens`);
+      console.log(`   Duration: ${formatDuration(lastRun.durationMs)}`);
+
+      if (history.totals.runs > 1) {
+        console.log(`\n   ── All Time (${history.totals.runs} runs) ──`);
+        console.log(`   Total tokens: ${formatTokens(history.totals.totalTokens)}`);
+        const avgTokens = Math.round(history.totals.totalTokens / history.totals.runs);
+        console.log(`   Avg/run:      ${formatTokens(avgTokens)}`);
+      }
+    }
+  }
 }

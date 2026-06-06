@@ -33,10 +33,11 @@ export async function init() {
   console.log("   /ai/runtime   → TASK, PLAN, STATE, SCOPE, RESULT");
   console.log("   /ai/control   → AGENTS, RULES");
   console.log("   /ai/memory    → SYSTEM_CONTEXT");
-  console.log("   /ai/profile   → STACK, PROJECT_TYPE, CONVENTIONS");
+  console.log("   /ai/profile   → STACK, PROJECT_TYPE, CONVENTIONS, AGENT");
   console.log("");
   console.log("✅ AI OS initialized. Next steps:");
-  console.log("   1. ai setup          → configure stack & project type");
-  console.log("   2. ai sync           → pull rules from registry");
-  console.log("   3. ai task \"<text>\"   → define a task");
+  console.log("   1. ai setup --agent=codex  → set AI agent (codex, claude, copilot)");
+  console.log("   2. ai setup --stack=nextjs → set your stack");
+  console.log("   3. ai sync                → pull rules from registry");
+  console.log("   4. ai task \"<text>\"        → define a task");
 }

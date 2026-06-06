@@ -12,6 +12,7 @@ export const paths = {
   state: join(AI_ROOT, "runtime", "STATE.json"),
   result: join(AI_ROOT, "runtime", "RESULT.md"),
   scope: join(AI_ROOT, "runtime", "ACTIVE_SCOPE.md"),
+  tokens: join(AI_ROOT, "runtime", "TOKENS.json"),
 
   // Control
   control: join(AI_ROOT, "control"),
@@ -27,6 +28,7 @@ export const paths = {
   stack: join(AI_ROOT, "profile", "STACK.md"),
   projectType: join(AI_ROOT, "profile", "PROJECT_TYPE.md"),
   conventions: join(AI_ROOT, "profile", "CONVENTIONS.md"),
+  agent: join(AI_ROOT, "profile", "AGENT"),
 
   // Meta
   version: join(AI_ROOT, ".ai-version"),
